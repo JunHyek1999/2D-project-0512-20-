@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Runtime.CompilerServices;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -6,47 +7,48 @@ using UnityEngine.SceneManagement;
 public class PlayerController : MonoBehaviour
 {
     [Header("캐릭터 HP")]
-    [SerializeField] private int maxHealth = 5;
-    private int currentHealth;
+    [SerializeField] private int maxHealth = 5;             // 최대 체력
+    private int currentHealth;                              // 현재 체력
 
-    [Header("캐릭터 이동속도")]
-    [SerializeField] private float walkSpeed = 5.0f;
-    [SerializeField] private float runSpeed = 8.0f;
+    [Header("캐릭터 이동/점프")]
+    [SerializeField] private float walkSpeed = 5.0f;            // 걷기 속도
+    [SerializeField] private float runSpeed = 8.0f;             // 달리기 속도
+    [SerializeField] private float jumpPower = 10.0f;           // 점프력
+    [SerializeField] private float lowJumpMultiplier = 2.0f;    // 점프 버튼을 짧게 누를 경우 낙하 가속도
 
-    [Header("캐릭터 점프력")]
-    [SerializeField] private float jumpPower = 10.0f;
-    [SerializeField] private float lowJumpMultiplier = 2.0f;
+    [Header("지면 감지 레이어")]
+    [SerializeField] private LayerMask groundLayer;             // 플레이어가 서 있을 바닥 레이어
 
-    [Header("Ground Layer 설정")]
-    [SerializeField] private LayerMask groundLayer;
-
-    [Header("체력 프리팹")]
-    public HeartManager heartManager;
+    [Header("하트 UI")]
+    public HeartManager heartManager;                           // 하트 UI를 관리하는 스크립트
 
     private Rigidbody2D rb;
     private BoxCollider2D playerBC;
     private Animator playerAnim;
 
-    private float moveX;
+    private float moveX;                                        // 좌우 입력 값
+    private bool isGrounded = false;                            // 지면에 닿았는지 여부
+    private bool isKnockback = false;                           // 넉백 상태 여부
+    private bool isInvincible = false;                          // 무적 상태 여부
+    [SerializeField] private float invincibleTime = 1.0f;       // 무적 지속 시간
 
-    private bool isInvincible = false;
-    [SerializeField] private float invincibleTime = 1.0f;
 
-    private bool isKnockback = false;
-    private bool isGrounded = false;
-    private bool isDead = false;
+    private bool isDead = false;                                // 사망 여부
 
 
     private void Awake()
     {
-        currentHealth = maxHealth;
-
+        // 컴포넌트 초기화
         rb = GetComponent<Rigidbody2D>();
         playerBC = rb.GetComponent<BoxCollider2D>();
         playerAnim = GetComponent<Animator>();
+        
+        // 체력 초기화
+        currentHealth = maxHealth;
     }
     private void Start()
     {
+        // 하트 UI 초기화
         if (HeartManager.Instance != null)
         {
             HeartManager.Instance.UpdateHearts(currentHealth);
@@ -54,26 +56,48 @@ public class PlayerController : MonoBehaviour
     }
     private void Update()
     {
-        MoveMent();      // 이동
-        CheckGrounded(); // 땅 체크
+        // 좌우 이동 입력
+        moveX = Input.GetAxisRaw("Horizontal");
 
-        moveX = Input.GetAxisRaw("Horizontal"); 
+        // 각 기능별 처리 함수 호출
+        HandleMovement();
+        HandleJump();
+        HandleAnimations();
+        HandleThrow();
+        HandleDirection();
 
-        // 점프 입력
+        // 머리 위 블록 충돌 체크
+        CheckCeilingHit();
+    }
+    private void HandleMovement()   // 이동 처리
+    {
+        // 넉백 상태일 땐 이동 불가
+        if (isKnockback) return;
+
+        // Shift 키로 달리기
+        float speed = Input.GetKey(KeyCode.LeftShift) ? runSpeed : walkSpeed;
+        // 속도 적용
+        rb.velocity = new Vector2(moveX * speed, rb.velocity.y);
+    }
+    private void HandleJump()   // 점프 처리
+    {
+        CheckGrounded();
+
         if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
         {
-            PlayerJump();
+            // 점프
+            rb.velocity = new Vector2(rb.velocity.x, jumpPower);
             Debug.Log("점프 시작");
         }
 
-        // 짧게/길게 점프
+        // 짧게 점프 시 빠른 낙하
         if (rb.velocity.y > 0 && !Input.GetKey(KeyCode.Space))
         {
-            // 스페이스바에서 손을 떼면 빠르게 낙하
             rb.velocity += Vector2.up * Physics2D.gravity.y * (lowJumpMultiplier - 1) * Time.deltaTime;
         }
-
-        // 던지기 입력
+    }
+    private void HandleThrow()   // 던지기 애니메이션 처리
+    {
         if (Input.GetKeyDown(KeyCode.LeftControl))
         {
             if (isGrounded)
@@ -84,59 +108,34 @@ public class PlayerController : MonoBehaviour
             {
                 playerAnim.SetBool("isJumpThrowing", true);
             }
-            // 애니메이션 끝나고 false로 돌리기
-            Invoke(nameof(ResetThrowBools), 0.5f);
-        }
 
-        // 웃으며 걷기 (z 키)
-        playerAnim.SetBool("isHappyWalk", Input.GetKey(KeyCode.Z));
-
-        // 걷기 / 달리기 상태
-        playerAnim.SetBool("isWalking", moveX != 0 && !Input.GetKey(KeyCode.LeftShift));
-        playerAnim.SetBool("isRunning", Input.GetKey(KeyCode.LeftShift) && moveX != 0);
-
-        // 점프 상태
-        playerAnim.SetBool("isJumping", !isGrounded && rb.velocity.y > 0);
-
-        // 낙하 상태
-        playerAnim.SetBool("isFalling", !isGrounded && rb.velocity.y < 0);
-
-        // 애니메이션 처리
-        if (playerAnim != null)
-        {
-            playerAnim.SetBool("isGrounded", isGrounded);
-        }
-
-        // 캐릭터 방향 전환
-        if (moveX != 0)
-        {
-            transform.localScale = new Vector3(Mathf.Sign(moveX), 1, 1); //좌우 반전
-        }
-
-        // 점프 중일 때 머리 위 블록 체크
-        if (rb.velocity.y > 0 && isGrounded == false)
-        {
-            CheckCeilingHit();
+            Invoke(nameof(ResetThrowBools), 0.5f);      // 일정 시간 후 애니메이션 종료
         }
     }
-   
-    private void ResetThrowBools()
+
+    private void ResetThrowBools()   // 던지기 애니메이션 상태 초기화
     {
         playerAnim.SetBool("isThrowing", false);
         playerAnim.SetBool("isJumpThrowing", false);
     }
-    private void MoveMent()
+    private void HandleAnimations()     // 애니메이션 상태 설정
     {
-        if (isKnockback) return;
-
-        float currentSpeed = Input.GetKey(KeyCode.LeftShift) ? runSpeed : walkSpeed;
-        rb.velocity = new Vector2(moveX * currentSpeed, rb.velocity.y);
+        playerAnim.SetBool("isHappyWalk", Input.GetKey(KeyCode.Z));
+        playerAnim.SetBool("isWalking", moveX != 0 && !Input.GetKey(KeyCode.LeftShift));
+        playerAnim.SetBool("isRunning", moveX != 0 && Input.GetKey(KeyCode.LeftShift));
+        playerAnim.SetBool("isJumping", !isGrounded && rb.velocity.y > 0);
+        playerAnim.SetBool("isFalling", !isGrounded && rb.velocity.y < 0);
+        playerAnim.SetBool("isGrounded", isGrounded);
     }
-    private void PlayerJump()
+    private void HandleDirection()      // 방향 전환 처리
     {
-        rb.velocity = new Vector2(rb.velocity.x, jumpPower);
+        if (moveX != 0)
+        {
+            // 왼쪽/오른쪽 전환
+            transform.localScale = new Vector3(Mathf.Sign(moveX), 1, 1);    
+        }
     }
-    private void CheckGrounded()
+    private void CheckGrounded()        // 바닥에 닿았는지 감지
     {
         Bounds bounds = playerBC.bounds;
         Vector2 origin = new Vector2(bounds.center.x, bounds.min.y - 0.05f);
@@ -146,45 +145,47 @@ public class PlayerController : MonoBehaviour
 
         Debug.DrawRay(origin, Vector2.down * 0.1f, isGrounded ? Color.green : Color.red);
     }
-    public void PlayerHurt(Vector2 hitDirection, int damage)
+    public void PlayerHurt(Vector2 hitDirection, int damage)        // 플레이어가 적에게 맞았을 때 실행
     {
         if (isDead || isInvincible) return;
 
         currentHealth -= damage;
+        // 체력 최소 0 보정
         currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
-        heartManager.UpdateHearts(currentHealth); // 하트 UI 갱신
+        // 하트 UI 갱신
+        heartManager.UpdateHearts(currentHealth); 
 
-        // 넉백
+        // 넉백 처리
         isKnockback = true;
-        rb.velocity = Vector2.zero; // 기존 속도 초기화
-        rb.AddForce(new Vector2(hitDirection.x * 10f, 2f), ForceMode2D.Impulse); // 넉백 방향 + 세기
+        // 기존 속도 초기화
+        rb.velocity = Vector2.zero;
+        // 넉백 방향 + 세기
+        rb.AddForce(new Vector2(hitDirection.x * 10f, 2f), ForceMode2D.Impulse); 
 
-
-        Debug.Log($"대미지를 입었다! 남은 체력 : {currentHealth}");
         playerAnim.SetTrigger("isHurt");
+        Debug.Log($"대미지를 입었다! 남은 체력 : {currentHealth}");
 
         if (currentHealth <= 0)
         {
             Die();
         }
 
-        // 피격 후 일정 시간 무적
+        // 무적 시간 및 넉백 회복 처리
         StartCoroutine(InvincibilityCo());
-        // 0.3초 뒤 이동 가능
         StartCoroutine(EndKnockbackAfterTimeCo(0.3f));
     }
-    private IEnumerator InvincibilityCo()
+    private IEnumerator InvincibilityCo()       // 무적 상태 유지 코루틴
     {
         isInvincible = true;
         yield return new WaitForSeconds(invincibleTime);
         isInvincible = false;
     }
-    private IEnumerator EndKnockbackAfterTimeCo(float duration)
+    private IEnumerator EndKnockbackAfterTimeCo(float duration)     // 넉백 상태 해제 코루틴
     {
         yield return new WaitForSeconds(duration);
         isKnockback = false;
     }
-    public void Die()
+    public void Die()       // 플레이어 사망 처리
     {
         Debug.Log("플레이어 사망 ");
 
@@ -208,7 +209,12 @@ public class PlayerController : MonoBehaviour
         // 2초 뒤 게임 오버 씬으로 전환
         Invoke("GoToGameOver", 2f);
     }
-    private void OnCollisionEnter2D(Collision2D collision)
+    private void GoToGameOver()     // 게임 오버 씬 전환
+    {
+        Debug.Log("게임 오버 씬으로 전환합니다");
+        SceneManager.LoadScene("GameOver");
+    }
+    private void OnCollisionEnter2D(Collision2D collision)      // 충돌 처리
     {
         // '적'과 충돌 시
         if (collision.gameObject.CompareTag("Enemy"))
@@ -224,44 +230,41 @@ public class PlayerController : MonoBehaviour
             PlayerHurt(hitDir, damage);
         }
 
-        // '음식'과 충돌 시 흡수 처리
+        // '음식'과 충돌 시 체력 회복
         if (collision.gameObject.CompareTag("Food"))
         {
             if (currentHealth < maxHealth)
             {
-                if (currentHealth < maxHealth)
-                {
-                    currentHealth += 1;
-                    currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth); // 예외 방지
-                    heartManager.UpdateHearts(currentHealth); // 하트 갱신
+                currentHealth++;
+                currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
+                heartManager.UpdateHearts(currentHealth);
 
-                    Debug.Log("체력 회복! 현재 체력 : " + currentHealth);
-                }
-                else
-                {
-                    Debug.Log("이미 최대 체력입니다.");
-                }
-
-                // 음식 오브젝트 제거
-                Destroy(collision.gameObject);
+                Debug.Log("체력 회복! 현재 체력 : " + currentHealth);
             }
+            else
+            {
+                Debug.Log("이미 최대 체력입니다.");
+            }
+
+            Destroy(collision.gameObject);
         }
     }
 
-    private void CheckCeilingHit()
+    private void CheckCeilingHit()      // 머리 위 블록 충돌 체크
     {
+        if (rb.velocity.y <= 0 || isGrounded) return;
+
         // 플레이어 콜라이더 기준으로 위쪽 중앙 위치 계산
         Bounds bounds = playerBC.bounds;
         Vector2 origin = new Vector2(bounds.center.x, bounds.max.y + 0.05f);
 
         // Raycast로 머리 위 블록 감지
         RaycastHit2D hit = Physics2D.Raycast(origin, Vector2.up, 0.1f, LayerMask.GetMask("Block"));
-
         Debug.DrawRay(origin, Vector2.up * 0.1f, hit.collider ? Color.green : Color.red);
 
         if (hit.collider != null)
         {
-            // 충돌한 순간 캐릭터 점프 속도 0 으로 만들기
+            // 충돌한 순간 점프 중단
             rb.velocity = new Vector2(rb.velocity.x, 0f);
 
             // 일반 블록일 경우 금 간 블록으로 교체
@@ -269,17 +272,23 @@ public class PlayerController : MonoBehaviour
             {
                 normalBlock.BreakToCracked();
             }
-            // 이미 금 간 블록이라면 아이템 소환 및 블록 파괴
+            // 금 간 블록일 경우 아이템 소환 및 블록 파괴
             else if (hit.collider.TryGetComponent(out CrackedBlock crackedBlock))
             {
-                crackedBlock.BreakAndSpawnItem();
+                // 블록 흔들림 연출
+                crackedBlock.ShakeBlock();
+                StartCoroutine(BreakCrackedBlockDelayed(crackedBlock, 0.25f));
             }
         }
     }
-    private void GoToGameOver()
+    private IEnumerator BreakCrackedBlockDelayed(CrackedBlock block, float delay)       // 금 간 블록 파괴 및 아이템 생성 지연 처리
     {
-        Debug.Log("게임 오버 씬으로 전환합니다");
-        SceneManager.LoadScene("GameOver");
+        yield return new WaitForSeconds(delay);
+        if (block != null)
+        {
+            block.BreakAndSpawnItem();
+        }
     }
+    
 
 }

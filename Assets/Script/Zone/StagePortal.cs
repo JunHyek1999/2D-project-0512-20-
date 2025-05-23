@@ -11,6 +11,7 @@ public class StagePortal : MonoBehaviour
     [Header("페이드 아웃 애니메이터")]
     public Animator fadeAnimator;
 
+    // 플레이어가 포탈 범위에 들어와 있는지 여부
     private bool isPlayerInRange = false;
    
     void Update()
@@ -22,17 +23,21 @@ public class StagePortal : MonoBehaviour
         }
     }
 
-    IEnumerator FadeAndLoad()
+    IEnumerator FadeAndLoad()       // 페이드 아웃 후 씬을 전환하는 코루틴
     {
+        // 애니메이터가 설정되어 있으면 페이드 아웃 실행
         if (fadeAnimator != null)
         {
+            // 애니메이터에서 "FadeOut" 트리거를 작동
             fadeAnimator.SetTrigger("FadeOut");
+
+            // 페이드 아웃 애니메이션이 재생될 시간을 기다림
             yield return new WaitForSeconds(1f); 
         }
-
+        // 설정한 다음 씬으로 전환
         SceneManager.LoadScene(nextSceneName);
     }
-    private void OnTriggerEnter2D(Collider2D collision)
+    private void OnTriggerEnter2D(Collider2D collision)     // 플레이어가 포탈 범위에 들어오면 호출
     {
         if (collision.CompareTag("Player"))
         {
@@ -40,7 +45,7 @@ public class StagePortal : MonoBehaviour
         }
     }
 
-    private void OnTriggerExit2D(Collider2D collision)
+    private void OnTriggerExit2D(Collider2D collision)      // 플레이어가 포탈 범위를 벗어나면 호출
     {
         if (collision.CompareTag("Player"))
         {
